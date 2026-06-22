@@ -1,0 +1,6 @@
+{
+  "name": "NDI Dementia Screening",
+  "description": "Narrative Degradation Index (NDI) screening support web application for communication and cognitive health monitoring.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
