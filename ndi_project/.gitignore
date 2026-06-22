@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Downloaded/generated artifacts and sensitive research data
+data/**/*.wav
+audio/*.wav
+models/*.pkl
+outputs/*.csv
+outputs/*.json
+outputs/*.png
+
