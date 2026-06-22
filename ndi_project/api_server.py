@@ -12,7 +12,10 @@ Uses:
 This avoids loading PyTorch/OpenBLAS locally which causes OOM on low-RAM machines.
 """
 
+
 from __future__ import annotations
+
+
 
 import os
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -137,7 +140,7 @@ def _transcribe_with_gemini(audio_path: Path, task_prompt: str) -> str:
     )
 
     # Try models in order — each has its own separate free-tier quota
-    models_to_try = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"]
     last_error = None
 
     for model_name in models_to_try:
@@ -431,26 +434,42 @@ def analyze(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Audio conversion to WAV failed: {e}")
 
-        # 2. Run local AI prediction pipeline
+        # 2. Run lightweight AI prediction pipeline
         try:
-            from src.predict import predict_patient
-            result = predict_patient(wav_path)
+            transcript = _transcribe_with_gemini(wav_path, task_prompt)
+            if not transcript:
+                transcript = "(No speech detected)"
+                
+            sentences = _split_sentences_spacy(transcript)
+            local_coh, global_coh = _calculate_coherence_tfidf(sentences, transcript)
+            story_data = _score_story_grammar(transcript)
+            biomarkers = _extract_acoustic_biomarkers(wav_path, transcript)
+            
+            story = {
+                "raw_score": story_data["raw_score"],
+                "components": story_data["components"]
+            }
+            
+            ndi_result = _calculate_ndi(
+                local_coh, 
+                global_coh, 
+                story_data["normalized_score"],
+                biomarkers["speech_rate"],
+                biomarkers["avg_pause_duration"]
+            )
+            
+            ndi_score = ndi_result["ndi_score"]
+            quality = ndi_result["quality_score"]
+            frontend_score = int(round(quality))
+            longest_pause = biomarkers.get("longest_pause", 0.0)
+            
+            lexical_richness = _calculate_lexical_richness(transcript)
+            repetition_score = _calculate_repetition_score(transcript)
+            
+            predicted_class = "Unknown"
+            class_probabilities = {}
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"AI model inference failed: {e}")
-
-        # 3. Extract and map features
-        transcript = result["transcript"]
-        local_coh = result["local_coherence"]
-        global_coh = result["global_coherence"]
-        story = {
-            "raw_score": result["story_grammar_raw_score"],
-            "components": result["story_grammar_components"]
-        }
-        biomarkers = result["speech_biomarkers"]
-        ndi_score = result["ndi_score"]
-        quality = result["health_score"]
-        frontend_score = int(round(quality))
-        longest_pause = biomarkers.get("longest_pause", 0.0)
 
         # 4. Map to frontend status strings
         if ndi_score < 20:
@@ -473,18 +492,18 @@ def analyze(
             "riskLevel": risk_level,
             "localCoherence": local_coh,
             "globalCoherence": global_coh,
-            "storyGrammar": result["story_grammar_raw_score"],
-            "speechRate": int(round(result["speech_rate"])),
-            "averagePause": round(result["avg_pause_duration"], 2),
+            "storyGrammar": story["raw_score"],
+            "speechRate": int(round(biomarkers.get("speech_rate", 0))),
+            "averagePause": round(biomarkers.get("avg_pause_duration", 0), 2),
             "longestPause": round(longest_pause, 2),
             "whyThisScore": why_score,
             "annotatedWords": annotated_words,
-            "lexicalRichness": result["lexical_richness"],
-            "repetitionScore": result["repetition_score"],
+            "lexicalRichness": lexical_richness,
+            "repetitionScore": repetition_score,
             "ndiRaw": ndi_score,
-            "storyComponents": result["story_grammar_components"],
-            "predictedClass": result["predicted_class"],
-            "classProbabilities": result["class_probabilities"],
+            "storyComponents": story["components"],
+            "predictedClass": predicted_class,
+            "classProbabilities": class_probabilities,
         }
 
     finally:
